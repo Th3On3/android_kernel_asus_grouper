@@ -202,37 +202,37 @@ static int proc_root_link(struct inode *inode, struct path *path)
 
 static struct mm_struct *__check_mem_permission(struct task_struct *task)
 {
-	struct mm_struct *mm;
+       struct mm_struct *mm;
 
-	mm = get_task_mm(task);
-	if (!mm)
-		return ERR_PTR(-EINVAL);
+       mm = get_task_mm(task);
+       if (!mm)
+               return ERR_PTR(-EINVAL);
 
-	/*
-	 * A task can always look at itself, in case it chooses
-	 * to use system calls instead of load instructions.
-	 */
-	if (task == current)
-		return mm;
+       /*
+        * A task can always look at itself, in case it chooses
+        * to use system calls instead of load instructions.
+        */
+       if (task == current)
+               return mm;
 
-	/*
-	 * If current is actively ptrace'ing, and would also be
-	 * permitted to freshly attach with ptrace now, permit it.
-	 */
-	if (task_is_stopped_or_traced(task)) {
-		int match;
-		rcu_read_lock();
-		match = (ptrace_parent(task) == current);
-		rcu_read_unlock();
-		if (match && ptrace_may_access(task, PTRACE_MODE_ATTACH))
-			return mm;
-	}
+       /*
+        * If current is actively ptrace'ing, and would also be
+        * permitted to freshly attach with ptrace now, permit it.
+        */
+       if (task_is_stopped_or_traced(task)) {
+               int match;
+               rcu_read_lock();
+               match = (ptrace_parent(task) == current);
+               rcu_read_unlock();
+               if (match && ptrace_may_access(task, PTRACE_MODE_ATTACH))
+                       return mm;
+       }
 
-	/*
-	 * No one else is allowed.
-	 */
-	mmput(mm);
-	return ERR_PTR(-EPERM);
+       /*
+        * No one else is allowed.
+        */
+       mmput(mm);
+       return ERR_PTR(-EPERM);
 }
 
 /*
@@ -241,42 +241,26 @@ static struct mm_struct *__check_mem_permission(struct task_struct *task)
  */
 static struct mm_struct *check_mem_permission(struct task_struct *task)
 {
-	struct mm_struct *mm;
-	int err;
+       struct mm_struct *mm;
+       int err;
 
-	/*
-	 * Avoid racing if task exec's as we might get a new mm but validate
-	 * against old credentials.
-	 */
-	err = mutex_lock_killable(&task->signal->cred_guard_mutex);
-	if (err)
-		return ERR_PTR(err);
+       /*
+        * Avoid racing if task exec's as we might get a new mm but validate
+        * against old credentials.
+        */
+       err = mutex_lock_killable(&task->signal->cred_guard_mutex);
+       if (err)
+               return ERR_PTR(err);
 
-	mm = __check_mem_permission(task);
-	mutex_unlock(&task->signal->cred_guard_mutex);
+       mm = __check_mem_permission(task);
+       mutex_unlock(&task->signal->cred_guard_mutex);
 
-	return mm;
+       return mm;
 }
 
 struct mm_struct *mm_for_maps(struct task_struct *task)
 {
-	struct mm_struct *mm;
-	int err;
-
-	err =  mutex_lock_killable(&task->signal->cred_guard_mutex);
-	if (err)
-		return ERR_PTR(err);
-
-	mm = get_task_mm(task);
-	if (mm && mm != current->mm &&
-			!ptrace_may_access(task, PTRACE_MODE_READ) &&
-			!capable(CAP_SYS_RESOURCE)) {
-		mmput(mm);
-		mm = ERR_PTR(-EACCES);
-	}
-	mutex_unlock(&task->signal->cred_guard_mutex);
-
-	return mm;
+	return mm_access(task, PTRACE_MODE_READ);
 }
 
 static int proc_pid_cmdline(struct task_struct *task, char * buffer)
