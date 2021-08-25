@@ -752,7 +752,7 @@ static int hci_sock_dev_event(struct notifier_block *this, unsigned long event, 
 		read_lock(&hci_sk_list.lock);
 		sk_for_each(sk, node, &hci_sk_list.head) {
 			local_bh_disable();
-			bh_lock_sock_nested(sk);
+			lock_sock(sk);
 			if (hci_pi(sk)->hdev == hdev) {
 				hci_pi(sk)->hdev = NULL;
 				sk->sk_err = EPIPE;
@@ -761,7 +761,7 @@ static int hci_sock_dev_event(struct notifier_block *this, unsigned long event, 
 
 				hci_dev_put(hdev);
 			}
-			bh_unlock_sock(sk);
+			release_sock(sk);
 			local_bh_enable();
 		}
 		read_unlock(&hci_sk_list.lock);
