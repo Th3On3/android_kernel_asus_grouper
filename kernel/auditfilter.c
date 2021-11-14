@@ -426,6 +426,7 @@ static struct audit_entry *audit_data_to_entry(struct audit_rule_data *data,
 	entry->rule.vers_ops = 2;
 	for (i = 0; i < data->field_count; i++) {
 		struct audit_field *f = &entry->rule.fields[i];
+		u32 f_val;
 
 		err = -EINVAL;
 
@@ -434,7 +435,7 @@ static struct audit_entry *audit_data_to_entry(struct audit_rule_data *data,
 			goto exit_free;
 
 		f->type = data->fields[i];
-		f->val = data->values[i];
+		f_val = data->values[i];
 		f->lsm_str = NULL;
 		f->lsm_rule = NULL;
 		switch(f->type) {
@@ -461,6 +462,7 @@ static struct audit_entry *audit_data_to_entry(struct audit_rule_data *data,
 		case AUDIT_ARG3:
 			break;
 		case AUDIT_ARCH:
+			f->val = f_val;
 			entry->rule.arch_f = f;
 			break;
 		case AUDIT_SUBJ_USER:
@@ -473,10 +475,13 @@ static struct audit_entry *audit_data_to_entry(struct audit_rule_data *data,
 		case AUDIT_OBJ_TYPE:
 		case AUDIT_OBJ_LEV_LOW:
 		case AUDIT_OBJ_LEV_HIGH:
-			str = audit_unpack_string(&bufp, &remain, f->val);
-			if (IS_ERR(str))
+			str = audit_unpack_string(&bufp, &remain, f_val);
+			if (IS_ERR(str)) {
+				err = PTR_ERR(str);
 				goto exit_free;
-			entry->rule.buflen += f->val;
+			}
+			entry->rule.buflen += f_val;
+			f->lsm_str = str;
 
 			err = security_audit_rule_init(f->type, f->op, str,
 						       (void **)&f->lsm_rule);
@@ -486,61 +491,62 @@ static struct audit_entry *audit_data_to_entry(struct audit_rule_data *data,
 				printk(KERN_WARNING "audit rule for LSM "
 				       "\'%s\' is invalid\n",  str);
 				err = 0;
-			}
-			if (err) {
-				kfree(str);
+			} else if (err)
 				goto exit_free;
-			} else
-				f->lsm_str = str;
 			break;
 		case AUDIT_WATCH:
-			str = audit_unpack_string(&bufp, &remain, f->val);
-			if (IS_ERR(str))
+			str = audit_unpack_string(&bufp, &remain, f_val);
+			if (IS_ERR(str)) {
+				err = PTR_ERR(str);
 				goto exit_free;
-			entry->rule.buflen += f->val;
-
-			err = audit_to_watch(&entry->rule, str, f->val, f->op);
+			}
+			err = audit_to_watch(&entry->rule, str, f_val, f->op);
 			if (err) {
 				kfree(str);
 				goto exit_free;
 			}
+			entry->rule.buflen += f_val;
 			break;
 		case AUDIT_DIR:
-			str = audit_unpack_string(&bufp, &remain, f->val);
-			if (IS_ERR(str))
+			str = audit_unpack_string(&bufp, &remain, f_val);
+			if (IS_ERR(str)) {
+				err = PTR_ERR(str);
 				goto exit_free;
-			entry->rule.buflen += f->val;
-
+			}
 			err = audit_make_tree(&entry->rule, str, f->op);
 			kfree(str);
 			if (err)
 				goto exit_free;
+			entry->rule.buflen += f_val;
 			break;
 		case AUDIT_INODE:
+			f->val = f_val;
 			err = audit_to_inode(&entry->rule, f);
 			if (err)
 				goto exit_free;
 			break;
 		case AUDIT_FILTERKEY:
-			err = -EINVAL;
-			if (entry->rule.filterkey || f->val > AUDIT_MAX_KEY_LEN)
-				goto exit_free;
-			str = audit_unpack_string(&bufp, &remain, f->val);
-			if (IS_ERR(str))
-				goto exit_free;
-			entry->rule.buflen += f->val;
+			if (entry->rule.filterkey || f_val > AUDIT_MAX_KEY_LEN)
+ 				goto exit_free;
+			str = audit_unpack_string(&bufp, &remain, f_val);
+ 			if (IS_ERR(str)) {
+ 				err = PTR_ERR(str);
+ 				goto exit_free;
+ 			}
+			entry->rule.buflen += f_val;
 			entry->rule.filterkey = str;
 			break;
 		case AUDIT_PERM:
-			if (f->val & ~15)
+			if (f_val & ~15)
 				goto exit_free;
 			break;
 		case AUDIT_FILETYPE:
-			if ((f->val & ~S_IFMT) > S_IFMT)
+			if ((f_val & ~S_IFMT) > S_IFMT)
 				goto exit_free;
 			break;
 		default:
-			goto exit_free;
+			f->val = f_val;
+			break;
 		}
 	}
 
