@@ -274,6 +274,8 @@ static int mt_input_mapping(struct hid_device *hdev, struct hid_input *hi,
 			return 1;
 		case HID_DG_TIPSWITCH:
 			hid_map_usage(hi, usage, bit, max, EV_KEY, BTN_TOUCH);
+			if (!*bit)
+				return -1;
 			input_set_capability(hi->input, EV_KEY, BTN_TOUCH);
 			if (td->last_mt_collection == usage->collection_index) {
 				td->last_slot_field = usage->hid;
