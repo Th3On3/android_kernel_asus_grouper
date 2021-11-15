@@ -210,7 +210,7 @@ static struct binder_transaction_log_entry *binder_transaction_log_add(
 
 struct binder_work {
 	struct list_head entry;
-	enum {
+	enum binder_work_type {
 		BINDER_WORK_TRANSACTION = 1,
 		BINDER_WORK_TRANSACTION_COMPLETE,
 		BINDER_WORK_NODE,
@@ -2601,10 +2601,15 @@ done:
 static void binder_release_work(struct list_head *list)
 {
 	struct binder_work *w;
+	enum binder_work_type wtype;
+
 	while (!list_empty(list)) {
 		w = list_first_entry(list, struct binder_work, entry);
+		wtype = w ? w->type : 0;
+		if (!w)
+			return;
 		list_del_init(&w->entry);
-		switch (w->type) {
+		switch (wtype) {
 		case BINDER_WORK_TRANSACTION: {
 			struct binder_transaction *t;
 
@@ -2638,9 +2643,11 @@ static void binder_release_work(struct list_head *list)
 			kfree(death);
 			binder_stats_deleted(BINDER_STAT_DEATH);
 		} break;
+		case BINDER_WORK_NODE:
+			break;
 		default:
 			pr_err("binder: unexpected work type, %d, not freed\n",
-			       w->type);
+			       wtype);
 			break;
 		}
 	}
