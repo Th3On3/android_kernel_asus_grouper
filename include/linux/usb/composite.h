@@ -163,6 +163,9 @@ int config_ep_by_speed(struct usb_gadget *g, struct usb_function *f,
 
 #define	MAX_CONFIG_INTERFACES		16	/* arbitrary; max 255 */
 
+
+#define USB_COMP_EP0_BUFSIZ   1024
+
 /**
  * struct usb_configuration - represents one gadget configuration
  * @label: For diagnostics, describes the configuration.
