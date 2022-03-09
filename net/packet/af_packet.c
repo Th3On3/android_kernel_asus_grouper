@@ -3608,7 +3608,9 @@ out:
 	return pg_vec;
 
 out_free_pgvec:
-	free_pg_vec(pg_vec, order, block_nr);
+	if (pg_vec) {
+		free_pg_vec(pg_vec, order, block_nr);
+	}
 	pg_vec = NULL;
 	goto out;
 }
