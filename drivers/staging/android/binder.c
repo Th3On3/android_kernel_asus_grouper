@@ -20,12 +20,12 @@
 #include <asm/cacheflush.h>
 #include <linux/fdtable.h>
 #include <linux/file.h>
+#include <linux/freezer.h>
 #include <linux/fs.h>
 #include <linux/list.h>
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
 #include <linux/module.h>
-#include <linux/rtmutex.h>
 #include <linux/mutex.h>
 #include <linux/nsproxy.h>
 #include <linux/poll.h>
@@ -42,8 +42,9 @@
 #include "binder.h"
 #include "binder_trace.h"
 
-static DEFINE_RT_MUTEX(binder_main_lock);
+static DEFINE_MUTEX(binder_main_lock);
 static DEFINE_MUTEX(binder_deferred_lock);
+static DEFINE_MUTEX(binder_mmap_lock);
 
 static HLIST_HEAD(binder_devices);
 static HLIST_HEAD(binder_procs);
@@ -535,14 +536,14 @@ out_unlock:
 static inline void binder_lock(const char *tag)
 {
 	trace_binder_lock(tag);
-	rt_mutex_lock(&binder_main_lock);
+	mutex_lock(&binder_main_lock);
 	trace_binder_locked(tag);
 }
 
 static inline void binder_unlock(const char *tag)
 {
 	trace_binder_unlock(tag);
-	rt_mutex_unlock(&binder_main_lock);
+	mutex_unlock(&binder_main_lock);
 }
 
 static void binder_set_nice(long nice)
@@ -2787,13 +2788,13 @@ retry:
 			if (!binder_has_proc_work(proc, thread))
 				ret = -EAGAIN;
 		} else
-			ret = wait_event_interruptible_exclusive(proc->wait, binder_has_proc_work(proc, thread));
+			ret = wait_event_freezable_exclusive(proc->wait, binder_has_proc_work(proc, thread));
 	} else {
 		if (non_block) {
 			if (!binder_has_thread_work(thread))
 				ret = -EAGAIN;
 		} else
-			ret = wait_event_interruptible(thread->wait, binder_has_thread_work(thread));
+			ret = wait_event_freezable(thread->wait, binder_has_thread_work(thread));
 	}
 
 	binder_lock(__func__);
@@ -3366,9 +3367,16 @@ static void binder_vma_close(struct vm_area_struct *vma)
 	binder_defer_work(proc, BINDER_DEFERRED_PUT_FILES);
 }
 
+ 
+static int binder_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+{
+       return VM_FAULT_SIGBUS;
+}
+
 static struct vm_operations_struct binder_vm_ops = {
 	.open = binder_vma_open,
 	.close = binder_vma_close,
+	.fault = binder_vm_fault,
 };
 
 static int binder_mmap(struct file *filp, struct vm_area_struct *vma)
@@ -3397,7 +3405,7 @@ static int binder_mmap(struct file *filp, struct vm_area_struct *vma)
 		goto err_bad_arg;
 	}
 	vma->vm_flags = (vma->vm_flags | VM_DONTCOPY) & ~VM_MAYWRITE;
-
+	mutex_lock(&binder_mmap_lock);
 	if (proc->buffer) {
 		ret = -EBUSY;
 		failure_string = "already mapped";
@@ -3412,6 +3420,7 @@ static int binder_mmap(struct file *filp, struct vm_area_struct *vma)
 	}
 	proc->buffer = area->addr;
 	proc->user_buffer_offset = vma->vm_start - (uintptr_t)proc->buffer;
+	mutex_unlock(&binder_mmap_lock);
 
 #ifdef CONFIG_CPU_CACHE_VIPT
 	if (cache_is_vipt_aliasing()) {
@@ -3456,10 +3465,12 @@ err_alloc_small_buf_failed:
 	kfree(proc->pages);
 	proc->pages = NULL;
 err_alloc_pages_failed:
+	mutex_lock(&binder_mmap_lock);
 	vfree(proc->buffer);
 	proc->buffer = NULL;
 err_get_vm_area_failed:
 err_already_mapped:
+        mutex_unlock(&binder_mmap_lock);
 err_bad_arg:
 	pr_err("binder_mmap: %d %lx-%lx %s failed %d\n",
 	       proc->pid, vma->vm_start, vma->vm_end, failure_string, ret);
